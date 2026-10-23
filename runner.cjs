@@ -2,9 +2,9 @@
 const crypto=require('node:crypto');
 class RunnerLease{
  constructor(database,clock=Date.now){this.ref=database.ref('_mizzeBotV1/runner');this.clock=clock;this.owner=crypto.randomBytes(16).toString('hex');this.owned=false;this.busy=false;}
- async renew(){if(this.busy)return this.owned;this.busy=true;try{const now=this.clock(),result=await this.ref.transaction(value=>(value===null||value.owner===this.owner||value.until<now)?{owner:this.owner,until:now+90000}:undefined);return this.owned=result.committed;}finally{this.busy=false;}}
+ async renew(){if(this.closing)return false;if(this.busy)return this.owned;this.busy=true;try{const now=this.clock(),result=await this.ref.transaction(value=>(value===null||value.owner===this.owner||value.until<now)?{owner:this.owner,until:now+90000}:undefined);return this.owned=result.committed;}finally{this.busy=false;}}
  start(){this.timer=setInterval(()=>this.renew().catch(()=>{this.owned=false;}),20000);this.timer.unref();}
- async release(){clearInterval(this.timer);await this.ref.transaction(value=>value?.owner===this.owner?null:undefined).catch(()=>{});this.owned=false;}
+ async release(){this.closing=true;clearInterval(this.timer);while(this.busy)await new Promise(resolve=>setTimeout(resolve,20));await this.ref.transaction(value=>value===null||value.owner===this.owner?null:undefined).catch(()=>{});this.owned=false;}
 }
 async function relaunch({token,repository,ref='main',fetcher=fetch}={}){
  if(!token||!/^[-\w.]+\/[-\w.]+$/.test(repository||''))throw Error('missing_dispatch_configuration');
