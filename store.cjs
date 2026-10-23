@@ -76,7 +76,14 @@ class Store{
  }
  async sales(day){const {start,end}=bounds(day),ref=this.db.ref('_mizzeBotV1/sales');
   const query=typeof ref.orderByChild==='function'?ref.orderByChild('createdAt').startAt(start).endAt(end-1):ref;
-  return Object.values((await query.get()).val()||{}).filter(x=>role(x.createdBy)==='admin'&&x.createdAt>=start&&x.createdAt<end).sort((a,b)=>a.createdAt-b.createdAt||a.hash.localeCompare(b.hash));
+  let snapshot;try{snapshot=await query.get();}catch(error){
+   // Existing installations may not have published the optional index. Only
+   // that exact failure permits a plain read of this private sales subtree;
+   // network/permission errors still propagate and never become empty reports.
+   if(query===ref||!/index not defined|no index defined/i.test(String(error.message||'')))throw error;
+   snapshot=await ref.get();
+  }
+  return Object.values(snapshot.val()||{}).filter(x=>role(x.createdBy)==='admin'&&x.createdAt>=start&&x.createdAt<end).sort((a,b)=>a.createdAt-b.createdAt||a.hash.localeCompare(b.hash));
  }
  async nextReportDay(){const ref=this.db.ref('_mizzeBotV1/reportCursor'),today=vnDay(this.clock());const result=await ref.transaction(value=>value||today);return result.snapshot.val();}
  async reportPage(day){return (await this.db.ref('_mizzeBotV1/dailyReports/'+day+'/nextPage').get()).val()||0;}

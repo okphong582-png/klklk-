@@ -52,6 +52,12 @@ password không vào record `licensesV9`. Vault key, bot token và Admin JSON ch
 ở Secrets, không đi vào code/log/artifact. Bot không cần RSA private signing key.
 Publish Rules đi kèm bản API R14.20, giữ `_mizzeBotV1` không cho client truy cập.
 
+Bản 14.21.1 xử lý trường hợp chưa publish index doanh số: chỉ khi Firebase báo
+thiếu index, bot đọc riêng nhánh sales rồi lọc đúng ngày và admin ở server.
+Lỗi mạng hoặc mất quyền vẫn báo lỗi, không biến thành báo cáo trống. Lỗi báo
+cáo có lịch thử lại riêng và không chặn nhận tin nhắn. Log chỉ ghi bước lỗi,
+mã HTTP/loại lỗi và số lần thử; không in token, key, URL hoặc nội dung exception.
+
 Chạy Actions → **Mizze Telegram Key Bot** → Run workflow. Chỉ chạy một poller cho
 token này; bot từ chối startup nếu đang có webhook, không tự xóa webhook khác.
 

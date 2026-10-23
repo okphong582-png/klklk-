@@ -1,10 +1,10 @@
 'use strict';
 const {ICONS,buttonIcon,titleIcon}=require('./icons.cjs');
-class TelegramError extends Error{constructor(code,retry){super('telegram_'+code);this.code=code;this.retry=retry;}}
+class TelegramError extends Error{constructor(code,retry,transport){super('telegram_'+code);this.code=code;this.retry=retry;if(['UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_SOCKET','ETIMEDOUT','ECONNRESET','ENOTFOUND','AbortError','TimeoutError'].includes(transport))this.transport=transport;}}
 class Telegram{
  constructor(token,fetcher=fetch){if(!/^\d+:[A-Za-z0-9_-]{30,}$/.test(token))throw Error('invalid_bot_token');this.token=token;this.fetcher=fetcher;this.icons={};this.custom=true;}
  async call(method,body={}){
-  let response;try{response=await this.fetcher('https://api.telegram.org/bot'+this.token+'/'+method,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(method==='getUpdates'?45000:12000)});}catch{throw new TelegramError('network');}
+  let response;try{response=await this.fetcher('https://api.telegram.org/bot'+this.token+'/'+method,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(method==='getUpdates'?45000:12000)});}catch(error){throw new TelegramError('network',undefined,error.cause?.code||error.name);}
   let value;try{value=await response.json();}catch{throw new TelegramError('invalid_response');}
   if(!response.ok||!value.ok)throw new TelegramError(value.error_code||response.status,value.parameters?.retry_after);
   return value.result;

@@ -12,7 +12,7 @@ const message=(id,text,chat={id,type:'private'})=>({update_id:uid++,message:{fro
 const callback=(id,data,chat={id,type:'private'})=>({update_id:uid++,callback_query:{id:'callback',from:{id,is_bot:false},message:{chat},data}});
 async function created(store,id=ADMIN,op=1){return store.create(id,{days:30,devices:2,count:1},op);}
 
-test('only the exact two user IDs in their own private chats can touch the bot',async()=>{
+test('only the three allowlisted user IDs in their own private chats can touch the bot',async()=>{
  const f=fixture();for(const u of [message(1,'/start'),message(OWNER,'/start',{id:-100,type:'group'}),message(ADMIN,'/start',{id:OWNER,type:'private'}),callback(1,'new')]){assert.equal(allowed(u),false);await f.app.handle(u);}
  assert.equal(f.sent.length,0);assert.deepEqual(f.db.dump(),{});await f.app.handle(message(OWNER,'/start'));assert.equal(f.sent[0].id,OWNER);
 });
@@ -147,4 +147,39 @@ test('runner lease safely transfers and dispatch really targets workflow_dispatc
  assert.ok(await first.renew());assert.equal(await second.renew(),false);now+=90001;assert.ok(await second.renew());assert.equal(await first.renew(),false);await first.release();assert.ok((await db.ref('_mizzeBotV1/runner').get()).val());await second.release();assert.equal((await db.ref('_mizzeBotV1/runner').get()).val(),null);
  let captured;await relaunch({token:'synthetic',repository:'demo/bot',fetcher:async(url,options)=>{captured={url,options};return {status:204};}});assert.ok(captured.url.endsWith('/actions/workflows/bot.yml/dispatches'));assert.equal(JSON.parse(captured.options.body).ref,'main');
  await assert.rejects(relaunch({token:'synthetic',repository:'demo/bot',fetcher:async()=>({status:403})}),/dispatch_http_403/);
+});
+
+test('missing sales index uses only private-subtree fallback and retains day/admin filtering',async()=>{
+ const rows={a:{hash:'a',createdBy:ADMIN,createdAt:Date.parse('2026-10-23T12:00:00+07:00')},b:{hash:'b',createdBy:OWNER,createdAt:Date.parse('2026-10-23T12:00:00+07:00')},c:{hash:'c',createdBy:ADMIN,createdAt:Date.parse('2026-10-22T12:00:00+07:00')}};
+ let reads=0,rootReads=0;const ref={orderByChild(){return {startAt(){return this;},endAt(){return this;},async get(){throw Error('Index not defined, add .indexOn');}};},async get(){reads++;return {val:()=>rows};}};
+ const db={ref(p){if(p!=='_mizzeBotV1/sales'){rootReads++;throw Error('unexpected_path');}return ref;}},store=new Store(db,crypto.randomBytes(32).toString('base64'));
+ assert.deepEqual((await store.sales('2026-10-23')).map(x=>x.hash),['a']);assert.equal(reads,1);assert.equal(rootReads,0);
+ ref.orderByChild=()=>({startAt(){return this;},endAt(){return this;},get:async()=>{throw Error('permission denied');}});
+ await assert.rejects(store.sales('2026-10-23'),/permission denied/);assert.equal(reads,1);
+ ref.orderByChild=()=>({startAt(){return this;},endAt(){return this;},get:async()=>{throw Error('network unavailable');}});
+ await assert.rejects(store.sales('2026-10-23'),/network unavailable/);assert.equal(reads,1);
+});
+
+test('background report failure never blocks commands and retries separately after one minute',async()=>{
+ const {Worker}=require('../worker.cjs');let now=1000,reports=0,polls=0;const handled=[],saved=[],logs=[];
+ const worker=new Worker({clock:()=>now,lease:{owned:true,renew:async()=>true},store:{offset:async n=>saved.push(n)},logger:{write:s=>logs.push(JSON.parse(s))},app:{flushReports:async()=>{},dailyTick:async()=>{reports++;throw Error('Index not defined at https://private.invalid?auth=secret');},handle:async u=>handled.push(u.update_id)},telegram:{call:async()=>{polls++;return [{update_id:10+polls}];}}});
+ let result=await worker.cycle(10);assert.equal(result.offset,12);assert.deepEqual(handled,[11]);assert.deepEqual(saved,[12]);assert.equal(logs[0].stage,'reports.background');assert.equal(logs[0].category,'firebase_index_missing');assert.ok(!JSON.stringify(logs).includes('secret'));
+ now+=30000;result=await worker.cycle(result.offset);assert.equal(reports,1);assert.equal(polls,2);
+ now+=30001;await worker.cycle(result.offset);assert.equal(reports,2);assert.equal(polls,3);
+});
+
+test('worker identifies poll/storage errors and preserves progress from earlier updates',async()=>{
+ const {Worker}=require('../worker.cjs');const app={flushReports:async()=>{},dailyTick:async()=>{},handle:async()=>{}},lease={owned:true,renew:async()=>true};
+ const fail=Object.assign(Error('private response'),{code:429}),worker=new Worker({app,lease,store:{offset:async()=>{}},telegram:{call:async()=>{throw fail;}}});
+ await assert.rejects(worker.cycle(0),e=>e===fail);assert.equal(worker.stage,'telegram.poll');
+ worker.tg.call=async()=>[{update_id:1},{update_id:2}];worker.store.offset=async n=>{if(n===3)throw Error('storage failed');};
+ await assert.rejects(worker.cycle(0),/storage failed/);assert.equal(worker.stage,'storage.offset');assert.equal(worker.offset,2);
+ lease.owned=false;assert.equal((await worker.cycle(2)).stop,true);
+});
+
+test('retry diagnostics never print credentials, raw exception text or arbitrary categories',async()=>{
+ const {logFailure}=require('../diagnostics.cjs'),entries=[],logger={write:s=>entries.push(JSON.parse(s))};
+ logFailure('telegram.poll',Object.assign(Error('https://private.invalid/bot999:secret?token=secret'),{code:'network',transport:'ECONNRESET'}),2,logger);
+ logFailure('secret-path',Object.assign(Error('secret body'),{code:'secret-token',transport:'secret'}),1,logger);
+ assert.equal(entries[0].transport,'ECONNRESET');assert.equal(entries[1].stage,'operation');assert.equal(entries[1].category,'operation_failed');assert.ok(!JSON.stringify(entries).includes('secret'));
 });

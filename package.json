@@ -1,7 +1,7 @@
 {
   "name": "mizze-telegram-key-bot",
   "private": true,
-  "version": "14.21.0",
+  "version": "14.21.1",
   "main": "run.cjs",
   "engines": {
     "node": ">=22 <25"
