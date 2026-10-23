@@ -7,16 +7,35 @@ bytes, proxy hoặc private key ký giấy phép.
 ## Quyền truy cập cố định
 
 - Owner **6482147126**: xem và quản lý toàn bộ key.
-- Admin **7567932286**: tạo key và quản lý key do chính admin này tạo.
+- Admin **7567932286** và **7976468365**: mỗi người tạo và quản lý key của mình.
 - Tất cả người khác, group/channel/inline message bị từ chối. Username không cấp quyền.
 - Khi admin tạo key, báo cáo riêng cho owner được lưu trong outbox và thử gửi lại
   khi lỗi mạng hoặc owner chưa bấm `/start`. Giao thông Telegram có thể giao lặp
   thông báo nếu mất phản hồi đúng lúc gửi; không tạo thêm key vì gửi lặp.
 
-Hai tài khoản cần mở bot rồi bấm **Start**. Dùng `/menu` để mở nút thao tác:
-tạo 1–10 key/lần, 1–3650 ngày, 1–50 máy/key; danh sách có phân trang, tra cứu,
+Ba tài khoản cần mở bot rồi bấm **Start**. Dùng `/menu` để mở nút thao tác:
+tạo 1–10 key/lần, 1–50 máy/key; admin chọn 1/7/30 ngày, owner chọn 1–3650 ngày.
+Danh sách có phân trang, tra cứu,
 xem Key/mật khẩu, khóa/mở, gỡ một hoặc toàn bộ máy, đổi hạn mức, xóa có xác nhận,
 thống kê. Key firstUse chưa kích hoạt chưa tính giờ. Gỡ máy không đặt lại thời hạn.
+
+Tin giao Key/mật khẩu có nút copy từng phần hoặc cả hai, cho phép chuyển tiếp
+và chia sẻ. Những tin quản trị khác vẫn được bảo vệ nội dung. Nút xóa key hết
+hạn có xác nhận, kiểm tra lại thời hạn và quyền trước khi xóa; key chưa kích
+hoạt hoặc còn hạn không bị xóa. Admin chỉ xóa key của mình, owner xóa toàn bộ.
+
+## Báo cáo doanh số
+
+Giá key admin: 1 ngày = 5.000đ, 7 ngày = 20.000đ, 30 ngày = 40.000đ. Lịch sử
+được ghi cùng giao dịch tạo key và vẫn giữ khi key bị xóa. Không tính key owner
+tạo vào tiền admin phải trả. Báo cáo tính theo số key tạo, không phải xác nhận
+thanh toán hay số key đã kích hoạt. Key cũ ngoài ba kỳ hạn được đánh dấu chưa có giá.
+
+Owner dùng `/check today` hoặc nút báo cáo để xem ảnh tổng kết hôm nay theo giờ
+Việt Nam (UTC+7). Lúc 00:00 bot gửi ảnh chốt ngày trước, chia trang nếu nhiều key.
+Con trỏ báo cáo và tiến độ gửi lưu trong Firebase để tiếp tục sau khi runner đổi.
+Nếu bot offline lúc nửa đêm, bot gửi bù khi hoạt động trở lại. Telegram có thể
+giao lặp một trang nếu mất phản hồi đúng lúc gửi; số liệu doanh số không bị nhân đôi.
 
 ## Cấu hình GitHub Actions Secrets
 
@@ -38,7 +57,7 @@ token này; bot từ chối startup nếu đang có webhook, không tự xóa we
 
 ## Icon Telegram Premium
 
-Bản giao diện 14.20.1 dùng bộ 18 custom emoji động đã kiểm tra metadata Telegram:
+Bản giao diện dùng bộ 18 custom emoji động đã kiểm tra metadata Telegram:
 vương miện, kim cương, tia chớp, tìm kiếm, biểu đồ, lịch, thiết bị, xác nhận và
 thông báo. Tiêu đề và từng nhóm nút dùng icon riêng; không lặp một icon mặc định
 cho mọi thao tác. Chỉ chọn sticker có animation/video; không giả animation bằng
@@ -52,12 +71,14 @@ Tài liệu: https://core.telegram.org/bots/api#inlinekeyboardbutton.
 
 ## Lịch chạy
 
-Workflow có lịch mỗi 5 giờ trong ngày UTC, phút 17 để giảm đụng giờ cao điểm;
-chuyển từ 20:17 sang 00:17 là 4 giờ vì ngày có 24 giờ. Worker chạy tối đa khoảng
-5 giờ 29 phút, lượt mới hủy lượt cũ; distributed lease trong Firebase ngăn hai
-poller hoạt động đồng thời. Offset, luồng nhập và outbox lưu ngoài runner, nên
-khởi động lại không xóa key hoặc đặt lại thời gian. Nếu bị kill không kịp trả
-lock, lượt mới chờ tối đa 90 giây. GitHub có thể trễ/bỏ lượt cron hoặc dừng lịch
+Worker chạy tối đa 5 giờ, nhả lease rồi dùng workflow_dispatch gọi lượt tiếp theo.
+GITHUB_TOKEN cần quyền actions:write như workflow đi kèm; không cần PAT trong code.
+Lịch mỗi giờ phút 17 là dự phòng nếu lượt cũ lỗi. Distributed lease trong Firebase
+ngăn hai poller đồng thời; lượt dự phòng thoát nhanh khi đang có leader khỏe.
+Offset, luồng nhập, báo cáo và outbox lưu ngoài runner, nên khởi động lại không
+xóa key hoặc đặt lại thời gian. Nếu bị kill không kịp trả lock, lease hết sau
+tối đa 90 giây. Bật rotation_test khi Run workflow để thử chuyển phiên 60 giây;
+lượt tiếp theo tự chạy bình thường 5 giờ. GitHub có thể trễ/bỏ lượt cron hoặc dừng lịch
 repo public sau 60 ngày không hoạt động: Actions không bảo đảm bot luôn online.
 Muốn 24/7, chạy `npm ci --ignore-scripts` rồi `npm start` dưới service trên VPS.
 

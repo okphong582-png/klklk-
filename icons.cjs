@@ -21,7 +21,7 @@ const ICONS={
  party:{emoji:'🎉',id:'5310228579009699834'},
  announce:{emoji:'📣',id:'5309984423003823246'}
 };
-const ACTION={new:'bolt',list:'folder',view:'star',search:'search',stats:'chart',help:'gem',days:'calendar',devices:'phone',count:'ticket',ask:'edit',issue:'check',home:'home',secret:'eye',cap:'phone',dev:'phone',act:'alert',confirm:'alert',do:'check',rmdev:'clean'};
+const ACTION={new:'bolt',list:'folder',view:'star',search:'search',stats:'chart',help:'gem',days:'calendar',devices:'phone',count:'ticket',ask:'edit',issue:'check',home:'home',secret:'eye',cap:'phone',dev:'phone',act:'alert',confirm:'alert',do:'check',rmdev:'clean',expired:'clean','expired-do':'alert',report:'chart'};
 function buttonIcon(data){return ICONS[ACTION[String(data).split(':')[0]]||'star'];}
 function titleIcon(text){
  if(text.startsWith('<b>MIZZE'))return ICONS.crown;

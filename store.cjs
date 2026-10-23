@@ -2,6 +2,7 @@
 const crypto=require('node:crypto');
 const {OWNER,ADMIN,PROJECT,role,path,integer}=require('./config.cjs');
 const credentials=require('./credentials.cjs');
+const {PRICES,vnDay,bounds,nextDay}=require('./reports.cjs');
 class Store{
  constructor(database,vaultKey,clock=Date.now){this.db=database;this.key=Buffer.from(vaultKey,'base64');if(this.key.length!==32)throw Error('invalid_vault_key');this.clock=clock;}
  seal(value){const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',this.key,iv);const bytes=Buffer.concat([cipher.update(JSON.stringify(value)),cipher.final()]);return {v:1,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:bytes.toString('base64')};}
@@ -11,6 +12,7 @@ class Store{
  async list(id){this.checkRole(id);const [r,m]=await Promise.all([this.db.ref('licensesV9').get(),this.db.ref('licenseAdminV9').get()]);const records=r.val()||{},metadata=m.val()||{};return Object.entries(records).filter(([hash,record])=>path.test(hash)&&record?.protocol===9&&(id===OWNER||metadata[hash]?.createdBy===id)).map(([hash,record])=>({hash,record,meta:metadata[hash]||{}})).sort((a,b)=>(b.record.createdAt||0)-(a.record.createdAt||0));}
  async create(id,{days,devices,count=1},operation){
   this.checkRole(id);integer(days,1,3650);integer(devices,1,50);integer(count,1,10);
+  if(id!==OWNER&&!Object.hasOwn(PRICES,days))throw Error('admin_plan');
   if(!/^\d{1,20}$/.test(String(operation)))throw Error('invalid_operation');
   const batchId=id+'-'+operation,ref=this.db.ref('_mizzeBotV1/batches/'+batchId);
   // Persist the entire random bundle before publishing keys: replaying a callback
@@ -24,7 +26,7 @@ class Store{
   if(batch.createdBy!==id||batch.days!==days||batch.devices!==devices||batch.count!==count)throw Error('operation_conflict');
   const entries=this.open(batch.vault),updates={};
   if(!batch.published){
-   for(const c of entries){updates['licensesV9/'+c.hash]=credentials.pendingRecord(days*86400000,batch.createdAt,devices);updates['licenseAdminV9/'+c.hash]={key:c.key,createdAt:batch.createdAt,createdBy:id,note:'Telegram · '+role(id),vault:this.seal({key:c.key,password:c.password})};}
+   for(const c of entries){updates['licensesV9/'+c.hash]=credentials.pendingRecord(days*86400000,batch.createdAt,devices);updates['licenseAdminV9/'+c.hash]={key:c.key,createdAt:batch.createdAt,createdBy:id,note:'Telegram · '+role(id),vault:this.seal({key:c.key,password:c.password})};if(role(id)==='admin')updates['_mizzeBotV1/sales/'+c.hash]={hash:c.hash,key:c.key,createdAt:batch.createdAt,createdBy:id,days,priceVnd:PRICES[days],batchId};}
    updates['_mizzeBotV1/batches/'+batchId+'/published']=true;
    updates['_mizzeBotV1/outbox/'+batchId]={batchId,createdAt:batch.createdAt,actor:id,type:'created',count,days,devices,vault:batch.vault};
    // All license records, private metadata and owner report are committed together.
@@ -53,6 +55,33 @@ class Store{
   const event=crypto.randomBytes(12).toString('hex');await this.db.ref('_mizzeBotV1/audit/'+event).set({actor:id,hash,action,at:this.clock()});
  }
  async lookup(id,value){const all=await this.list(id);const needle=value.trim().toUpperCase();return all.find(x=>x.hash===value.trim()||x.meta.key===needle)||null;}
+ async expired(id){return (await this.list(id)).filter(x=>Number.isSafeInteger(x.record.expiresAt)&&x.record.expiresAt>0&&x.record.expiresAt<=this.clock());}
+ async deleteExpired(id,hashes){
+  this.checkRole(id);const scope=new Set((await this.expired(id)).map(x=>x.hash));let deleted=0,skipped=0;
+  for(const hash of hashes){if(!scope.has(hash)){skipped++;continue;}
+   const result=await this.db.ref('licensesV9/'+hash).transaction(record=>{
+    if(record===null)return null;if(record.protocol!==9||!Number.isSafeInteger(record.expiresAt)||record.expiresAt<=0||record.expiresAt>this.clock())return;return null;
+   });
+   if(result.committed&&result.snapshot.val()===null){await this.db.ref('licenseAdminV9/'+hash).remove();deleted++;}else skipped++;
+  }
+  return {deleted,skipped};
+ }
+ async backfillSales(){
+  const batches=(await this.db.ref('_mizzeBotV1/batches').get()).val()||{},existing=(await this.db.ref('_mizzeBotV1/sales').get()).val()||{},updates={};
+  for(const [batchId,batch] of Object.entries(batches)){
+   if(!batch.published||role(batch.createdBy)!=='admin')continue;
+   for(const c of this.open(batch.vault))if(!existing[c.hash])updates['_mizzeBotV1/sales/'+c.hash]={hash:c.hash,key:c.key,createdAt:batch.createdAt,createdBy:batch.createdBy,days:batch.days,priceVnd:PRICES[batch.days]??null,batchId};
+  }
+  if(Object.keys(updates).length)await this.db.ref().update(updates);
+ }
+ async sales(day){const {start,end}=bounds(day),ref=this.db.ref('_mizzeBotV1/sales');
+  const query=typeof ref.orderByChild==='function'?ref.orderByChild('createdAt').startAt(start).endAt(end-1):ref;
+  return Object.values((await query.get()).val()||{}).filter(x=>role(x.createdBy)==='admin'&&x.createdAt>=start&&x.createdAt<end).sort((a,b)=>a.createdAt-b.createdAt||a.hash.localeCompare(b.hash));
+ }
+ async nextReportDay(){const ref=this.db.ref('_mizzeBotV1/reportCursor'),today=vnDay(this.clock());const result=await ref.transaction(value=>value||today);return result.snapshot.val();}
+ async reportPage(day){return (await this.db.ref('_mizzeBotV1/dailyReports/'+day+'/nextPage').get()).val()||0;}
+ async sentReportPage(day,page){await this.db.ref('_mizzeBotV1/dailyReports/'+day+'/nextPage').set(page);}
+ async completeDaily(day){await this.db.ref().update({'_mizzeBotV1/reportCursor':nextDay(day),['_mizzeBotV1/dailyReports/'+day+'/completedAt']:this.clock()});}
  async saveState(id,value){this.checkRole(id);await this.db.ref('_mizzeBotV1/state/'+id).set(value);}
  async state(id){this.checkRole(id);const value=(await this.db.ref('_mizzeBotV1/state/'+id).get()).val();return value&&value.until>this.clock()?value:null;}
  async pendingReports(){return (await this.db.ref('_mizzeBotV1/outbox').get()).val()||{};}

@@ -1,20 +1,23 @@
 'use strict';
 const crypto=require('node:crypto');
-const {OWNER,ADMIN,role,allowed,html,integer}=require('./config.cjs');
+const {OWNER,ADMIN,ADMINS,role,allowed,html,integer}=require('./config.cjs');
+const {PRICES,vnDay,totals,money,renderReport}=require('./reports.cjs');
 function status(record){return record.enabled!==true?'Đã khóa':record.timeMode==='firstUse'&&record.activatedAt===0?'Chưa kích hoạt':record.expiresAt<=Date.now()?'Hết hạn':'Đang hoạt động';}
 function summary(item){const r=item.record;return '<b>'+html(item.meta.key||item.hash.slice(0,12))+'</b>\n'+status(r)+' · '+Object.keys(r.devices||{}).length+'/'+r.maxDevices+' máy\n'+(r.activatedAt===0&&r.timeMode==='firstUse'?'Thời hạn: '+r.durationMs/86400000+' ngày từ lần dùng đầu':'Hết hạn: '+new Date(r.expiresAt).toISOString().replace('T',' ').slice(0,19)+' UTC');}
 class App{
- constructor(store,telegram){this.store=store;this.tg=telegram;}
+ constructor(store,telegram,renderer=renderReport){this.store=store;this.tg=telegram;this.renderer=renderer;}
  b(...args){return this.tg.button(...args);}
  async state(id,value){await this.store.saveState(id,value?{...value,until:Date.now()+15*60000}:null);}
  async home(id){await this.state(id,null);return this.tg.send(id,'<b>MIZZE · LICENSE CONSOLE</b>\n'+(id===OWNER?'OWNER · Toàn quyền':'ADMIN · Quản lý key do bạn tạo')+'\n\nKey chỉ tính giờ từ lần kích hoạt hợp lệ đầu tiên.',[
   [this.b('Tạo key','new','success','➕'),this.b('Danh sách key','list:0','primary','📋')],
   [this.b('Tra cứu key','search','primary','🔎'),this.b('Thống kê','stats','primary','📊')],
+  [this.b('Xóa key hết hạn','expired','danger')],
+  ...(id===OWNER?[[this.b('Báo cáo hôm nay','report:today')]]:[]),
   [this.b('Hướng dẫn','help','primary','💎')]]);}
  async createMenu(id){await this.state(id,{kind:'create',days:30,devices:1,count:1});return this.days(id);}
  async days(id){return this.tg.send(id,'<b>01 · CHỌN THỜI HẠN</b>\nChỉ bắt đầu tính khi khách dùng key lần đầu.',[
-  [this.b('7 ngày','days:7'),this.b('30 ngày','days:30')],[this.b('90 ngày','days:90'),this.b('365 ngày','days:365')],
-  [this.b('Nhập số ngày','ask:days')],[this.b('Hủy','home','danger')]]);}
+  [this.b('1 ngày · 5k','days:1'),this.b('7 ngày · 20k','days:7')],[this.b('30 ngày · 40k','days:30')],
+  ...(id===OWNER?[[this.b('90 ngày','days:90'),this.b('365 ngày','days:365')],[this.b('Nhập số ngày','ask:days')]]:[]),[this.b('Hủy','home','danger')]]);}
  async devices(id){return this.tg.send(id,'<b>02 · SỐ THIẾT BỊ / KEY</b>\nCác máy dùng chung hạn key; thêm máy không gia hạn.',[
   [this.b('1 máy','devices:1'),this.b('2 máy','devices:2'),this.b('3 máy','devices:3')],
   [this.b('5 máy','devices:5'),this.b('10 máy','devices:10'),this.b('50 máy','devices:50')],
@@ -43,6 +46,7 @@ class App{
    if(!callback){const text=update.message.text||'';
     if(text==='/start'||text==='/menu'||text==='/cancel')return this.home(id);
     if(text==='/id')return this.tg.send(id,'ID: <code>'+id+'</code> · '+role(id));
+    if(/^\/check(?:\s+today)?\s*$/i.test(text)){if(id!==OWNER)throw Error('forbidden');return this.sendDaily(vnDay(this.store.clock()),false);}
     const state=await this.store.state(id);
     if(state?.kind==='search'){const item=await this.store.lookup(id,text);if(!item)return this.tg.send(id,'Không tìm thấy key trong phạm vi quản lý.',[[this.b('Menu','home')]]);await this.state(id,null);return this.details(id,item);}
     if(state?.kind==='input'){
@@ -56,28 +60,38 @@ class App{
    }
    const data=callback.data||'',parts=data.split(':'),action=parts[0];
    if(data==='home')return this.home(id);if(data==='new')return this.createMenu(id);
+   if(data==='report:today'){if(id!==OWNER)throw Error('forbidden');return this.sendDaily(vnDay(this.store.clock()),false);}
+   if(data==='expired'){
+    const entries=await this.store.expired(id);if(!entries.length)return this.tg.send(id,'Không có key hết hạn trong phạm vi quản lý.',[[this.b('Menu','home')]]);
+    const nonce=crypto.randomBytes(6).toString('hex');await this.state(id,{kind:'expired',hashes:entries.map(x=>x.hash),nonce});
+    return this.tg.send(id,'<b>XÓA KEY HẾT HẠN</b>\n'+entries.length+' key sẽ được xóa. Key chưa kích hoạt hoặc còn hạn không bị xóa. Lịch sử báo cáo vẫn giữ.',[[this.b('Xác nhận xóa','expired-do:'+nonce,'danger'),this.b('Hủy','home')]]);
+   }
+   if(action==='expired-do'){
+    const state=await this.store.state(id);if(state?.kind!=='expired'||state.nonce!==parts[1])throw Error('expired_state');
+    const result=await this.store.deleteExpired(id,state.hashes);await this.state(id,null);return this.tg.send(id,'Đã xóa '+result.deleted+' key hết hạn; bỏ qua '+result.skipped+' key đã thay đổi.',[[this.b('Danh sách','list:0'),this.b('Menu','home')]]);
+   }
    if(action==='list')return this.list(id,integer(parts[1],0,1000000));
    if(data==='search'){await this.state(id,{kind:'search'});return this.tg.send(id,'Gửi Key hoặc mã tra cứu 64 ký tự. Không gửi mật khẩu.',[[this.b('Hủy','home','danger')]]);}
    if(data==='stats'){const all=await this.store.list(id),counts={};for(const x of all)counts[status(x.record)]=(counts[status(x.record)]||0)+1;return this.tg.send(id,'<b>THỐNG KÊ</b>\n'+Object.entries(counts).map(([s,n])=>html(s)+': '+n).join('\n')+'\nTổng: '+all.length,[[this.b('Menu','home')]]);}
-   if(data==='help')return this.tg.send(id,'<b>HƯỚNG DẪN</b>\n1. Tạo key → chọn ngày, số máy, số lượng → xác nhận.\n2. Giao Key và mật khẩu cho khách.\n3. Key tính giờ từ lần kích hoạt đầu; dùng chung hạn cho các máy.\n4. Khóa, xóa hoặc gỡ máy có hiệu lực ở lần làm mới; proof offline còn tối đa 600 giây.\n\nOwner: '+OWNER+'\nAdmin: '+ADMIN+' (chỉ key tự tạo).\nIcon Premium phụ thuộc quyền bot của Telegram.\n/cancel để hủy thao tác.',[[this.b('Menu','home')]]);
+   if(data==='help')return this.tg.send(id,'<b>HƯỚNG DẪN</b>\n1. Tạo key → chọn ngày, số máy, số lượng → xác nhận.\n2. Giao Key và mật khẩu cho khách.\n3. Key tính giờ từ lần kích hoạt đầu; dùng chung hạn cho các máy.\n4. Khóa, xóa hoặc gỡ máy có hiệu lực ở lần làm mới; proof offline còn tối đa 600 giây.\n\nOwner: '+OWNER+'\nAdmin: '+ADMINS.join(', ')+' (chỉ key tự tạo).\nIcon Premium phụ thuộc quyền bot của Telegram.\n/cancel để hủy thao tác.',[[this.b('Menu','home')]]);
    if(['days','devices','count','ask','issue'].includes(action)){
     const state=await this.store.state(id);if(!state)throw Error('expired_state');
     if(action==='issue'){
      if(state.kind!=='confirm'||parts[1]!==state.nonce)throw Error('expired_state');
      const batch=await this.store.create(id,state,update.update_id);await this.state(id,null);
-     for(const [index,c] of batch.entries.entries())await this.tg.send(id,'<b>KEY ĐÃ TẠO · '+(index+1)+'/'+batch.count+'</b>\nKey: <code>'+c.key+'</code>\nMật khẩu: <code>'+c.password+'</code>\n'+batch.days+' ngày từ lần kích hoạt đầu · '+batch.devices+' máy\nMã tra cứu: <code>'+c.hash+'</code>',[[this.b('Quản lý key','view:'+c.hash.slice(0,16)),this.b('Menu','home')]]);
+     for(const [index,c] of batch.entries.entries())await this.tg.send(id,'<b>KEY ĐÃ TẠO · '+(index+1)+'/'+batch.count+'</b>\nKey: <code>'+c.key+'</code>\nMật khẩu: <code>'+c.password+'</code>\n'+batch.days+' ngày từ lần kích hoạt đầu · '+batch.devices+' máy\nMã tra cứu: <code>'+c.hash+'</code>',this.deliveryButtons(c),{forwardable:true});
      await this.flushReports();return;
     }
     if(state.kind!=='create'&&state.kind!=='input')throw Error('expired_state');
-    if(action==='ask'){if(!['days','devices','count'].includes(parts[1]))throw Error('invalid_action');await this.state(id,{...state,kind:'input',field:parts[1]});return this.tg.send(id,'Nhập số nguyên '+(parts[1]==='days'?'ngày (1–3650)':parts[1]==='devices'?'máy (1–50)':'key (1–10)')+'.',[[this.b('Hủy','home','danger')]]);}
-    const n=integer(parts[1],1,action==='days'?3650:action==='count'?10:50),next={...state,kind:'create',[action]:n};await this.state(id,next);
+    if(action==='ask'){if(!['days','devices','count'].includes(parts[1]))throw Error('invalid_action');if(parts[1]==='days'&&id!==OWNER)throw Error('admin_plan');await this.state(id,{...state,kind:'input',field:parts[1]});return this.tg.send(id,'Nhập số nguyên '+(parts[1]==='days'?'ngày (1–3650)':parts[1]==='devices'?'máy (1–50)':'key (1–10)')+'.',[[this.b('Hủy','home','danger')]]);}
+    const n=integer(parts[1],1,action==='days'?3650:action==='count'?10:50);if(action==='days'&&id!==OWNER&&!Object.hasOwn(PRICES,n))throw Error('admin_plan');const next={...state,kind:'create',[action]:n};await this.state(id,next);
     return action==='days'?this.devices(id):action==='devices'?this.quantity(id):this.confirmation(id,next);
    }
    const prefix=['act','confirm','do','rmdev'].includes(action)?parts[2]:parts[1],item=await this.resolve(id,prefix);
    if(action==='view')return this.details(id,item);
    if(action==='secret'){
     if(!item.meta.vault)return this.tg.send(id,'Mật khẩu key cũ chỉ có trên trình duyệt đã tạo; bot không có bản lưu.',[[this.b('Quay lại','view:'+prefix)]]);
-    const c=this.store.open(item.meta.vault);return this.tg.send(id,'<b>THÔNG TIN GIAO KHÁCH</b>\nKey: <code>'+html(c.key)+'</code>\nMật khẩu: <code>'+html(c.password)+'</code>\n'+html(status(item.record)),[[this.b('Quay lại','view:'+prefix)]]);
+    const c=this.store.open(item.meta.vault);return this.tg.send(id,'<b>THÔNG TIN GIAO KHÁCH</b>\nKey: <code>'+html(c.key)+'</code>\nMật khẩu: <code>'+html(c.password)+'</code>\n'+html(status(item.record)),this.deliveryButtons({...c,hash:item.hash}),{forwardable:true});
    }
    if(action==='cap'){await this.state(id,{kind:'input',field:'limit',hash:item.hash});return this.tg.send(id,'Nhập số máy mới (1–50). Không được thấp hơn số máy đang đăng ký.',[[this.b('Hủy','home','danger')]]);}
    if(action==='act'&&['enable','disable'].includes(parts[1])){await this.store.mutate(id,item.hash,parts[1]);return this.details(id,await this.store.snapshot(item.hash,id));}
@@ -101,10 +115,20 @@ class App{
    }
    throw Error('invalid_action');
   }catch(error){
-   const message={invalid_number:'Số nhập không hợp lệ. Hãy nhập lại.',not_found:'Không tìm thấy key hoặc thiết bị.',forbidden:'Bạn không có quyền quản lý key này.',expired_state:'Nút đã hết hạn. Mở menu và thao tác lại.',conflict:'Chưa thay đổi: key không còn tồn tại hoặc số máy thấp hơn số đang dùng.'}[error.message]||'Không hoàn tất. Dữ liệu đã tạo có thể đã lưu; kiểm tra danh sách trước khi tạo lại.';
+   const message={admin_plan:'Admin chỉ tạo key 1, 7 hoặc 30 ngày.',invalid_number:'Số nhập không hợp lệ. Hãy nhập lại.',not_found:'Không tìm thấy key hoặc thiết bị.',forbidden:'Bạn không có quyền quản lý key này.',expired_state:'Nút đã hết hạn. Mở menu và thao tác lại.',conflict:'Chưa thay đổi: key không còn tồn tại hoặc số máy thấp hơn số đang dùng.'}[error.message]||'Không hoàn tất. Dữ liệu đã tạo có thể đã lưu; kiểm tra danh sách trước khi tạo lại.';
    await this.tg.send(id,message,[[this.b('Menu','home')]]);
   }
  }
+ deliveryButtons(c){return [[this.tg.copyButton('Copy Key',c.key),this.tg.copyButton('Copy mật khẩu',c.password)],[this.tg.copyButton('Copy cả bộ','Key: '+c.key+'\nMật khẩu: '+c.password)],[this.b('Quản lý key','view:'+c.hash.slice(0,16)),this.b('Menu','home')]];}
+ async sendDaily(day,scheduled=false){
+  const rows=await this.store.sales(day),t=totals(rows),pages=Math.max(1,Math.ceil(rows.length/24)),start=scheduled?await this.store.reportPage(day):0;
+  for(let page=start;page<pages;page++){
+   const image=await this.renderer(day,rows,page);await this.tg.photo(OWNER,image,'<b>BÁO CÁO '+day+'</b> · '+(page+1)+'/'+pages+'\n'+t.keys+' key admin · Tổng owner phải thu: '+money(t.total));
+   if(scheduled)await this.store.sentReportPage(day,page+1);
+  }
+  if(scheduled)await this.store.completeDaily(day);
+ }
+ async dailyTick(){for(let n=0;n<3;n++){const day=await this.store.nextReportDay();if(day>=vnDay(this.store.clock()))return;await this.sendDaily(day,true);}}
  async flushReports(){
   for(const [key,event] of Object.entries(await this.store.pendingReports())){
    if(event.actor===OWNER){await this.store.completeReport(key);continue;}

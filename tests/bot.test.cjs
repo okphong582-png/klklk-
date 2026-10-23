@@ -6,7 +6,7 @@ function fakeDB(){let root={},queue=Promise.resolve();const clone=x=>x===undefin
  const set=(p,value)=>{const keys=parts(p);if(!keys.length){root=clone(value)||{};return;}let v=root;for(const key of keys.slice(0,-1)){if(!v[key]||typeof v[key]!=='object')v[key]={};v=v[key];}if(value===null)delete v[keys.at(-1)];else v[keys.at(-1)]=clone(value);};
  return {ref(path=''){return {get:async()=>({val:()=>get(path)}),set:async v=>set(path,v),remove:async()=>set(path,null),update:async updates=>{for(const [p,v] of Object.entries(updates))set(path+'/'+p,v);},transaction(fn){const next=queue.then(()=>{const value=fn(get(path));if(value===undefined)return {committed:false,snapshot:{val:()=>get(path)}};set(path,value);return {committed:true,snapshot:{val:()=>get(path)}};});queue=next.catch(()=>{});return next;}};},dump:()=>clone(root)};
 }
-function fixture(){const db=fakeDB(),store=new Store(db,crypto.randomBytes(32).toString('base64')),sent=[],tg={button:(text,callback_data,style)=>({text,callback_data,style}),send:async(id,text,rows=[])=>{sent.push({id,text,rows});return {message_id:sent.length};},answer:async()=>{}},app=new App(store,tg);return {db,store,tg,sent,app};}
+function fixture(){const db=fakeDB(),store=new Store(db,crypto.randomBytes(32).toString('base64')),sent=[],tg={button:(text,callback_data,style)=>({text,callback_data,style}),copyButton:(text,value)=>({text,copy_text:{text:value}}),photo:async(id,image,caption)=>{sent.push({id,image,caption});},send:async(id,text,rows=[],options={})=>{sent.push({id,text,rows,options});return {message_id:sent.length};},answer:async()=>{}},app=new App(store,tg);return {db,store,tg,sent,app};}
 let uid=100;
 const message=(id,text,chat={id,type:'private'})=>({update_id:uid++,message:{from:{id,is_bot:false},chat,text}});
 const callback=(id,data,chat={id,type:'private'})=>({update_id:uid++,callback_query:{id:'callback',from:{id,is_bot:false},message:{chat},data}});
@@ -81,4 +81,69 @@ test('header-only custom emoji failure falls back once; static stickers are reje
  await tg.send(OWNER,'<b>MIZZE · LICENSE CONSOLE</b>');assert.equal(calls.length,2);assert.ok(!calls[1].text.includes('<tg-emoji'));assert.ok(calls[1].text.includes('👑'));
  const onlyStatic=new Telegram('1234:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890',async()=>({ok:true,json:async()=>({ok:true,result:[{custom_emoji_id:ICONS.star.id,is_animated:false,is_video:false}]})}));
  await onlyStatic.decorate();assert.equal(onlyStatic.custom,false);assert.ok(!onlyStatic.button('Tạo','new').icon_custom_emoji_id);
+});
+
+test('both admins can create only 1/7/30-day plans; owner retains other durations',async()=>{
+ const f=fixture(),other=7976468365;
+ assert.ok(allowed(message(other,'/start')));await f.app.handle(message(other,'/start'));assert.ok(f.sent.some(s=>s.id===other));
+ const a=await f.store.create(ADMIN,{days:1,devices:1},700),b=await f.store.create(other,{days:7,devices:1},701);
+ assert.equal((await f.store.snapshot(a.entries[0].hash,ADMIN)).record.durationMs,86400000);
+ await assert.rejects(f.store.snapshot(a.entries[0].hash,other),/forbidden/);
+ for(const id of [ADMIN,other])await assert.rejects(f.store.create(id,{days:90,devices:1},702),/admin_plan/);
+ await f.store.create(OWNER,{days:90,devices:1},703);assert.equal((await f.store.list(OWNER)).length,3);assert.equal((await f.store.list(other)).length,1);
+});
+
+test('created and retrieved credential messages have copy buttons and allow forwarding',async()=>{
+ const f=fixture();for(const data of ['new','days:1','devices:1','count:1'])await f.app.handle(callback(ADMIN,data));
+ await f.app.handle(callback(ADMIN,f.sent.at(-1).rows[0][0].callback_data));
+ const delivered=f.sent.find(s=>s.id===ADMIN&&s.text?.includes('KEY ĐÃ TẠO'));assert.equal(delivered.options.forwardable,true);
+ assert.equal(delivered.rows[0][0].copy_text.text.startsWith('MZ10-'),true);assert.equal(delivered.rows[0][1].copy_text.text.length,48);assert.ok(delivered.rows[1][0].copy_text.text.includes('Mật khẩu:'));
+ const key=(await f.store.list(ADMIN))[0];await f.app.handle(callback(ADMIN,'secret:'+key.hash.slice(0,16)));assert.equal(f.sent.at(-1).options.forwardable,true);
+ const calls=[],tg=new Telegram('1234:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890',async(url,options)=>{calls.push(JSON.parse(options.body));return {ok:true,json:async()=>({ok:true,result:{message_id:1}})};});
+ tg.custom=false;await tg.send(ADMIN,'Credentials',[[tg.copyButton('Copy','test-copy')]],{forwardable:true});assert.equal(calls[0].protect_content,false);assert.equal(calls[0].reply_markup.inline_keyboard[0][0].copy_text.text,'test-copy');assert.ok(!calls[0].reply_markup.inline_keyboard[0][0].callback_data);
+});
+
+test('bulk expiry cleanup deletes only own expired keys and retains the sales ledger',async()=>{
+ const f=fixture();let now=Date.now();f.store.clock=()=>now;
+ const mine=(await f.store.create(ADMIN,{days:1,devices:1,count:3},801)).entries;
+ const foreign=(await f.store.create(7976468365,{days:1,devices:1},802)).entries[0];
+ await f.db.ref('licensesV9/'+mine[0].hash+'/expiresAt').set(now-1);
+ await f.db.ref('licensesV9/'+mine[1].hash+'/expiresAt').set(now+86400000);
+ await f.db.ref('licensesV9/'+foreign.hash+'/expiresAt').set(now-1);
+ const result=await f.store.deleteExpired(ADMIN,[...mine.map(c=>c.hash),foreign.hash]);assert.equal(result.deleted,1);assert.equal(result.skipped,3);
+ assert.ok((await f.db.ref('licensesV9/'+mine[2].hash).get()).val());assert.ok((await f.db.ref('licensesV9/'+foreign.hash).get()).val());
+ assert.equal(Object.keys((await f.db.ref('_mizzeBotV1/sales').get()).val()).length,4);
+ await f.app.handle(callback(ADMIN,'expired-do:forged'));assert.ok((await f.db.ref('licensesV9/'+mine[1].hash).get()).val());
+});
+
+test('Vietnam day boundaries and price totals are exact; old batches backfill only once',async()=>{
+ const {vnDay,bounds,totals}=require('../reports.cjs');assert.equal(vnDay(Date.parse('2026-10-23T17:00:00Z')),'2026-10-24');assert.equal(vnDay(Date.parse('2026-10-23T16:59:59.999Z')),'2026-10-23');assert.equal(bounds('2026-10-24').start,Date.parse('2026-10-23T17:00:00Z'));
+ const f=fixture();f.store.clock=()=>Date.parse('2026-10-23T12:00:00+07:00');
+ for(const [n,days] of [1,7,30].entries())await f.store.create(ADMIN,{days,devices:1},900+n);
+ await f.store.create(7976468365,{days:1,devices:1},903);await f.store.create(OWNER,{days:30,devices:1},904);
+ let rows=await f.store.sales('2026-10-23');assert.equal(totals(rows).total,70000);assert.equal(totals(rows).keys,4);
+ await f.db.ref('_mizzeBotV1/sales').remove();await f.store.backfillSales();await f.store.backfillSales();rows=await f.store.sales('2026-10-23');assert.equal(rows.length,4);assert.equal(totals(rows).total,70000);
+});
+
+test('owner /check today returns a private image; scheduled report survives restarts without double totals',async()=>{
+ const f=fixture();let now=Date.parse('2026-10-23T23:59:00+07:00');f.store.clock=()=>now;await f.store.nextReportDay();await f.store.create(ADMIN,{days:1,devices:1},1001);
+ const renderCalls=[],renderer=async(day,rows,page)=>{renderCalls.push({day,rows,page});return Buffer.from('synthetic-image');},app=new App(f.store,f.tg,renderer);
+ await app.handle(message(ADMIN,'/check today'));assert.ok(!f.sent.some(x=>x.image));
+ await app.handle(message(OWNER,'/check today'));assert.equal(f.sent.filter(x=>x.image).length,1);assert.ok(f.sent.at(-1).caption.includes('5.000'));
+ now=Date.parse('2026-10-24T00:00:30+07:00');await app.dailyTick();assert.equal(f.sent.filter(x=>x.image).length,2);assert.equal(await f.store.nextReportDay(),'2026-10-24');
+ await new App(f.store,f.tg,renderer).dailyTick();assert.equal(f.sent.filter(x=>x.image).length,2);assert.equal(renderCalls.at(-1).day,'2026-10-23');
+});
+
+test('report renderer produces a real readable PNG with all key rows and total',async()=>{
+ const {renderReport}=require('../reports.cjs'),sharp=require('sharp'),fs=require('node:fs'),path=require('node:path');
+ const rows=[1,7,30].map((days,i)=>({hash:String(i).repeat(64),key:'MZ10-DEMO-KEY-'+String(i+1).padStart(2,'0'),days,createdAt:Date.parse('2026-10-23T10:00:00+07:00')+i*60000,createdBy:ADMIN,priceVnd:({1:5000,7:20000,30:40000})[days]}));
+ const png=await renderReport('2026-10-23',rows);assert.equal(png.subarray(1,4).toString(),'PNG');const info=await sharp(png).metadata();assert.equal(info.width,1160);assert.ok(info.height>500);
+ if(process.env.MIZZE_REPORT_PREVIEW)fs.writeFileSync(process.env.MIZZE_REPORT_PREVIEW,png);
+});
+
+test('runner lease safely transfers and dispatch really targets workflow_dispatch',async()=>{
+ const {RunnerLease,relaunch}=require('../runner.cjs'),db=fakeDB();let now=1000;const first=new RunnerLease(db,()=>now),second=new RunnerLease(db,()=>now);
+ assert.ok(await first.renew());assert.equal(await second.renew(),false);now+=90001;assert.ok(await second.renew());assert.equal(await first.renew(),false);await first.release();assert.ok((await db.ref('_mizzeBotV1/runner').get()).val());await second.release();assert.equal((await db.ref('_mizzeBotV1/runner').get()).val(),null);
+ let captured;await relaunch({token:'synthetic',repository:'demo/bot',fetcher:async(url,options)=>{captured={url,options};return {status:204};}});assert.ok(captured.url.endsWith('/actions/workflows/bot.yml/dispatches'));assert.equal(JSON.parse(captured.options.body).ref,'main');
+ await assert.rejects(relaunch({token:'synthetic',repository:'demo/bot',fetcher:async()=>({status:403})}),/dispatch_http_403/);
 });

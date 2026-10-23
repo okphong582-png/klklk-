@@ -1,24 +1,27 @@
 name: Mizze Telegram Key Bot
 on:
   workflow_dispatch:
+    inputs:
+      rotation_test:
+        description: 'Run a 60-second handoff test, then launch the normal five-hour worker'
+        type: boolean
+        default: false
   schedule:
-    - cron: '17 */5 * * *'
+    - cron: '17 * * * *'
   push:
     branches: [main]
 permissions:
   contents: read
-concurrency:
-  group: mizze-telegram-key-bot
-  cancel-in-progress: true
+  actions: write
 jobs:
   bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 335
+    timeout-minutes: 320
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       FIREBASE_ADMIN_JSON: ${{ secrets.FIREBASE_ADMIN_JSON }}
       BOT_VAULT_KEY: ${{ secrets.BOT_VAULT_KEY }}
-      RUN_SECONDS: '19740'
+      RUN_SECONDS: ${{ inputs.rotation_test && '60' || '18000' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,4 +35,10 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
       - name: Run Telegram bot
+        id: worker
         run: npm start
+      - name: Start next five-hour worker
+        if: steps.worker.outputs.relaunch == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node relaunch.cjs

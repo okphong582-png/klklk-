@@ -19,10 +19,11 @@ class Telegram{
   const selected=buttonIcon(data),icon=this.custom&&(this.icons[selected.id]||this.defaultIcon);
   return {text:icon?text:selected.emoji+' '+text,callback_data:data,style,...(icon?{icon_custom_emoji_id:icon}:{})};
  }
- async send(chat,text,rows=[]){
+ copyButton(text,value){if(typeof value!=='string'||!value.length||value.length>256)throw Error('invalid_copy_text');const b=this.button(text,'secret');delete b.callback_data;return {...b,copy_text:{text:value}};}
+ async send(chat,text,rows=[],options={}){
   const icon=titleIcon(text),prefix=this.custom&&this.icons[icon.id]?'<tg-emoji emoji-id="'+icon.id+'">'+icon.emoji+'</tg-emoji>':icon.emoji;
   const decorated=text.startsWith('<b>')?text.replace('<b>','<b>'+prefix+' '):text;
-  const body={chat_id:chat,text:decorated,parse_mode:'HTML',protect_content:true,link_preview_options:{is_disabled:true},...(rows.length?{reply_markup:{inline_keyboard:rows}}:{})};
+  const body={chat_id:chat,text:decorated,parse_mode:'HTML',protect_content:options.forwardable!==true,link_preview_options:{is_disabled:true},...(rows.length?{reply_markup:{inline_keyboard:rows}}:{})};
   try{return await this.call('sendMessage',body);}catch(error){
    // Telegram Premium permission is evaluated by Telegram, never assumed locally.
    if(error.code!==400||(!body.text.includes('<tg-emoji ')&&!rows.some(row=>row.some(b=>b.icon_custom_emoji_id))))throw error;
@@ -30,6 +31,11 @@ class Telegram{
    if(rows.length)body.reply_markup.inline_keyboard=rows.map(row=>row.map(({icon_custom_emoji_id,...button})=>({...button,text:icon_custom_emoji_id?buttonIcon(button.callback_data).emoji+' '+button.text:button.text})));
    return this.call('sendMessage',body);
   }
+ }
+ async photo(chat,image,caption){
+  const form=new FormData();form.set('chat_id',String(chat));form.set('photo',new Blob([image],{type:'image/png'}),'mizze-daily.png');form.set('caption',caption);form.set('parse_mode','HTML');form.set('protect_content','true');
+  let response,value;try{response=await this.fetcher('https://api.telegram.org/bot'+this.token+'/sendPhoto',{method:'POST',body:form,signal:AbortSignal.timeout(30000)});value=await response.json();}catch{throw new TelegramError('network');}
+  if(!response.ok||!value.ok)throw new TelegramError(value.error_code||response.status,value.parameters?.retry_after);return value.result;
  }
  async answer(id,text=''){try{await this.call('answerCallbackQuery',{callback_query_id:id,text});}catch{}}
 }
