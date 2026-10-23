@@ -61,3 +61,24 @@ test('Premium buttons use real custom emoji IDs and safely fall back on Telegram
  const calls=[];const tg=new Telegram('1234:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890',async(url,options)=>{const body=JSON.parse(options.body);calls.push(body);if(calls.length===1)return {ok:false,status:400,json:async()=>({ok:false,error_code:400})};return {ok:true,json:async()=>({ok:true,result:{message_id:1}})};});
  tg.defaultIcon='123456789';await tg.send(OWNER,'Test',[[tg.button('Test','home')]]);assert.equal(calls.length,2);assert.equal(calls[0].reply_markup.inline_keyboard[0][0].icon_custom_emoji_id,'123456789');assert.ok(!calls[1].reply_markup.inline_keyboard[0][0].icon_custom_emoji_id);
 });
+
+test('animated theme gives distinct action icons and a custom emoji title',async()=>{
+ const {ICONS}=require('../icons.cjs'),calls=[];
+ const tg=new Telegram('1234:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890',async(url,options)=>{
+  const body=JSON.parse(options.body);calls.push(body);
+  return {ok:true,json:async()=>({ok:true,result:url.endsWith('/getCustomEmojiStickers')?Object.values(ICONS).map(x=>({custom_emoji_id:x.id,is_animated:true})): {message_id:2}})};
+ });
+ await tg.decorate();const a=tg.button('Tạo','new'),b=tg.button('Tìm','search'),c=tg.button('Thống kê','stats');
+ assert.equal(new Set([a,b,c].map(x=>x.icon_custom_emoji_id)).size,3);
+ await tg.send(OWNER,'<b>MIZZE · LICENSE CONSOLE</b>',[[a,b,c]]);
+ assert.ok(calls.at(-1).text.includes('<tg-emoji emoji-id="'+ICONS.crown.id+'">'));
+});
+
+test('header-only custom emoji failure falls back once; static stickers are rejected',async()=>{
+ const {ICONS}=require('../icons.cjs'),calls=[];
+ const tg=new Telegram('1234:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890',async(url,options)=>{const body=JSON.parse(options.body);calls.push(body);return calls.length===1?{ok:false,status:400,json:async()=>({ok:false,error_code:400})}:{ok:true,json:async()=>({ok:true,result:{message_id:3}})};});
+ tg.icons[ICONS.crown.id]=ICONS.crown.id;
+ await tg.send(OWNER,'<b>MIZZE · LICENSE CONSOLE</b>');assert.equal(calls.length,2);assert.ok(!calls[1].text.includes('<tg-emoji'));assert.ok(calls[1].text.includes('👑'));
+ const onlyStatic=new Telegram('1234:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890',async()=>({ok:true,json:async()=>({ok:true,result:[{custom_emoji_id:ICONS.star.id,is_animated:false,is_video:false}]})}));
+ await onlyStatic.decorate();assert.equal(onlyStatic.custom,false);assert.ok(!onlyStatic.button('Tạo','new').icon_custom_emoji_id);
+});

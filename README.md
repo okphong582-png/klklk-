@@ -38,6 +38,12 @@ token này; bot từ chối startup nếu đang có webhook, không tự xóa we
 
 ## Icon Telegram Premium
 
+Bản giao diện 14.20.1 dùng bộ 18 custom emoji động đã kiểm tra metadata Telegram:
+vương miện, kim cương, tia chớp, tìm kiếm, biểu đồ, lịch, thiết bị, xác nhận và
+thông báo. Tiêu đề và từng nhóm nút dùng icon riêng; không lặp một icon mặc định
+cho mọi thao tác. Chỉ chọn sticker có animation/video; không giả animation bằng
+cách sửa tin nhắn liên tục.
+
 Bot lấy custom emoji ID từ Telegram, gắn vào nút `icon_custom_emoji_id` cùng màu
 nút primary/success/danger. Telegram yêu cầu bot có quyền dùng custom emoji
 (owner bot có Premium hoặc bot đủ điều kiện Fragment). Nếu Telegram từ chối,
