@@ -1,0 +1,16 @@
+{
+  "name": "mizze-telegram-key-bot",
+  "private": true,
+  "version": "14.20.0",
+  "main": "run.cjs",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "start": "node run.cjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  }
+}

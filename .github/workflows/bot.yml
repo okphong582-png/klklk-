@@ -1,0 +1,35 @@
+name: Mizze Telegram Key Bot
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */5 * * *'
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: mizze-telegram-key-bot
+  cancel-in-progress: true
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 335
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      FIREBASE_ADMIN_JSON: ${{ secrets.FIREBASE_ADMIN_JSON }}
+      BOT_VAULT_KEY: ${{ secrets.BOT_VAULT_KEY }}
+      RUN_SECONDS: '19740'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Check private configuration exists
+        run: node -e 'for(const k of ["TELEGRAM_BOT_TOKEN","FIREBASE_ADMIN_JSON","BOT_VAULT_KEY"])if(!process.env[k])throw Error("Missing secret "+k)'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - name: Run Telegram bot
+        run: npm start
