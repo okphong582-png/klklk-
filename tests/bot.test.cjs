@@ -117,6 +117,7 @@ test('bulk expiry cleanup deletes only own expired keys and retains the sales le
 });
 
 test('Vietnam day boundaries and price totals are exact; old batches backfill only once',async()=>{
+ const {reportSvg}=require('../reports.cjs');assert.match(reportSvg('2026-10-23',[{key:'OLD-KEY',createdBy:ADMIN,days:90,createdAt:Date.now()}]).toString(),/Chưa đặt giá/);
  const {vnDay,bounds,totals}=require('../reports.cjs');assert.equal(vnDay(Date.parse('2026-10-23T17:00:00Z')),'2026-10-24');assert.equal(vnDay(Date.parse('2026-10-23T16:59:59.999Z')),'2026-10-23');assert.equal(bounds('2026-10-24').start,Date.parse('2026-10-23T17:00:00Z'));
  const f=fixture();f.store.clock=()=>Date.parse('2026-10-23T12:00:00+07:00');
  for(const [n,days] of [1,7,30].entries())await f.store.create(ADMIN,{days,devices:1},900+n);
