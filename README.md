@@ -1,5 +1,15 @@
 # Mizze · Telegram License Console
 
+## Upload từ Windows
+
+Chạy `UP-BOT-LEN-GITHUB.bat` để đưa bản báo cáo mới lên repo
+`okphong582-png/klklk-`. Cần Git for Windows và Node.js 22–24. Script clone riêng
+nhánh main, backup các file sẽ thay vào thư mục backups của New folder (18),
+kiểm tra checksum, chạy tests rồi mới commit/push. Git xử lý đăng nhập bằng
+tài khoản có quyền ghi repo. `--check` chỉ kiểm tra công cụ và file, không upload.
+Chỉ sáu file giao diện báo cáo/test/uploader được commit; không đưa Secrets,
+node_modules, mã game hoặc toàn bộ dự án proxy lên repo bot. Xem Actions sau push.
+
 Bot quản trị key + mật khẩu cho **dự án chính vghgfhf-7000b**, tương thích menu
 Mizze R14.10 trở lên và API firstUse R14.19/R14.20. Bot không chứa source game,
 bytes, proxy hoặc private key ký giấy phép.
@@ -25,6 +35,12 @@ hạn có xác nhận, kiểm tra lại thời hạn và quyền trước khi x�
 hoạt hoặc còn hạn không bị xóa. Admin chỉ xóa key của mình, owner xóa toàn bộ.
 
 ## Báo cáo doanh số
+
+Bố cục mới ngày 25/10/2026: thẻ tổng công nợ, số key và số admin; cơ cấu các gói
+1/7/30 ngày; tổng riêng từng admin; bảng chi tiết từng key và caption Telegram
+dễ đọc. Giá lấy từ lịch sử tạo key, không áp giá hiện tại ngược lên key cũ.
+Key dài tự xuống dòng; trang trống có trạng thái riêng. Vẫn 24 key/trang để giữ
+tiến độ gửi và lịch chốt ngày hiện tại. Không gửi tin thử tới tài khoản thật.
 
 Giá key admin: 1 ngày = 5.000đ, 7 ngày = 20.000đ, 30 ngày = 40.000đ. Lịch sử
 được ghi cùng giao dịch tạo key và vẫn giữ khi key bị xóa. Không tính key owner

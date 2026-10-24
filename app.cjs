@@ -1,7 +1,7 @@
 'use strict';
 const crypto=require('node:crypto');
 const {OWNER,ADMIN,ADMINS,role,allowed,html,integer}=require('./config.cjs');
-const {PRICES,vnDay,totals,money,renderReport}=require('./reports.cjs');
+const {PRICES,vnDay,totals,money,renderReport,reportCaption}=require('./reports.cjs');
 function status(record){return record.enabled!==true?'Đã khóa':record.timeMode==='firstUse'&&record.activatedAt===0?'Chưa kích hoạt':record.expiresAt<=Date.now()?'Hết hạn':'Đang hoạt động';}
 function summary(item){const r=item.record;return '<b>'+html(item.meta.key||item.hash.slice(0,12))+'</b>\n'+status(r)+' · '+Object.keys(r.devices||{}).length+'/'+r.maxDevices+' máy\n'+(r.activatedAt===0&&r.timeMode==='firstUse'?'Thời hạn: '+r.durationMs/86400000+' ngày từ lần dùng đầu':'Hết hạn: '+new Date(r.expiresAt).toISOString().replace('T',' ').slice(0,19)+' UTC');}
 class App{
@@ -123,7 +123,7 @@ class App{
  async sendDaily(day,scheduled=false){
   const rows=await this.store.sales(day),t=totals(rows),pages=Math.max(1,Math.ceil(rows.length/24)),start=scheduled?await this.store.reportPage(day):0;
   for(let page=start;page<pages;page++){
-   const image=await this.renderer(day,rows,page);await this.tg.photo(OWNER,image,'<b>BÁO CÁO '+day+'</b> · '+(page+1)+'/'+pages+'\n'+t.keys+' key admin · Tổng owner phải thu: '+money(t.total));
+   const image=await this.renderer(day,rows,page);await this.tg.photo(OWNER,image,reportCaption(day,rows,page,pages));
    if(scheduled)await this.store.sentReportPage(day,page+1);
   }
   if(scheduled)await this.store.completeDaily(day);
