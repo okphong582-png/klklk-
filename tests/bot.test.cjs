@@ -97,7 +97,7 @@ test('created and retrieved credential messages have copy buttons and allow forw
  const f=fixture();for(const data of ['new','days:1','devices:1','count:1'])await f.app.handle(callback(ADMIN,data));
  await f.app.handle(callback(ADMIN,f.sent.at(-1).rows[0][0].callback_data));
  const delivered=f.sent.find(s=>s.id===ADMIN&&s.text?.includes('KEY ĐÃ TẠO'));assert.equal(delivered.options.forwardable,true);
- assert.equal(delivered.rows[0][0].copy_text.text.startsWith('MZ10-'),true);assert.equal(delivered.rows[0][1].copy_text.text.length,48);assert.ok(delivered.rows[1][0].copy_text.text.includes('Mật khẩu:'));
+ assert.match(delivered.rows[0][0].copy_text.text,/^[A-HJ-NP-Z2-9]{8}$/);assert.match(delivered.rows[0][1].copy_text.text,/^[A-HJ-NP-Z2-9]{8}$/);assert.ok(delivered.rows[1][0].copy_text.text.includes('Mật khẩu:'));
  const key=(await f.store.list(ADMIN))[0];await f.app.handle(callback(ADMIN,'secret:'+key.hash.slice(0,16)));assert.equal(f.sent.at(-1).options.forwardable,true);
  const calls=[],tg=new Telegram('1234:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890',async(url,options)=>{calls.push(JSON.parse(options.body));return {ok:true,json:async()=>({ok:true,result:{message_id:1}})};});
  tg.custom=false;await tg.send(ADMIN,'Credentials',[[tg.copyButton('Copy','test-copy')]],{forwardable:true});assert.equal(calls[0].protect_content,false);assert.equal(calls[0].reply_markup.inline_keyboard[0][0].copy_text.text,'test-copy');assert.ok(!calls[0].reply_markup.inline_keyboard[0][0].callback_data);

@@ -112,3 +112,5 @@ Lịch cron: https://docs.github.com/en/actions/reference/workflows-and-actions/
 Node 24: `npm ci --ignore-scripts` → `npm test`. Unit tests dùng fake DB/Telegram,
 không nhắn người thật hoặc sửa dữ liệu thật. Key cũ tạo bằng web không có mật
 khẩu trong database; bot không tự khôi phục hoặc đoán mật khẩu key cũ.
+
+Key và mật khẩu mới: mỗi phần đúng 8 ký tự chữ/số ngẫu nhiên an toàn, bỏ ký tự dễ nhầm I/O/0/1. Key cũ và mật khẩu dài vẫn hợp lệ. Cần menu R14.34 trở lên để nhập mật khẩu 8 ký tự; bản cũ yêu cầu tối thiểu 16.
