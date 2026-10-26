@@ -1,10 +1,10 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),crypto=require('node:crypto');
 const credentials=require('../credentials.cjs');
-test('new key and password are independent 8-character unambiguous random values with unchanged pair framing',async()=>{
+test('new key and password are independent 16-character unambiguous random values with unchanged pair framing',async()=>{
  const pairs=new Set();
  for(let i=0;i<1000;i++){
-  const c=credentials.generate();assert.match(c.key,/^[A-HJ-NP-Z2-9]{8}$/);assert.match(c.password,/^[A-HJ-NP-Z2-9]{8}$/);assert.notEqual(c.key,c.password);
-  const frame='mizze-pair-v1\n8:'+c.key+'\n8:'+c.password;
+  const c=credentials.generate();assert.match(c.key,/^[A-HJ-NP-Z2-9]{16}$/);assert.match(c.password,/^[A-HJ-NP-Z2-9]{16}$/);assert.notEqual(c.key,c.password);
+  const frame='mizze-pair-v1\n16:'+c.key+'\n16:'+c.password;
   assert.equal(await credentials.hash(c.key,c.password),crypto.createHash('sha256').update(frame).digest('hex'));
   pairs.add(c.key+':'+c.password);
  }

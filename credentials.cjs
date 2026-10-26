@@ -11,7 +11,7 @@
  async function hash(key,password,cryptoApi=root.crypto){return hex(new Uint8Array(await cryptoApi.subtle.digest('SHA-256',new TextEncoder().encode(frame(key,password)))));}
  function generate(cryptoApi=root.crypto){
   const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const random=()=>{const a=new Uint8Array(8);cryptoApi.getRandomValues(a);return Array.from(a,b=>alphabet[b&31]).join('');};
+  const random=()=>{const a=new Uint8Array(16);cryptoApi.getRandomValues(a);return Array.from(a,b=>alphabet[b&31]).join('');};
   const key=random();let password;do{password=random();}while(password===key);
   return {key,password};
  }
