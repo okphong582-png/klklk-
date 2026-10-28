@@ -183,3 +183,30 @@ test('retry diagnostics never print credentials, raw exception text or arbitrary
  logFailure('secret-path',Object.assign(Error('secret body'),{code:'secret-token',transport:'secret'}),1,logger);
  assert.equal(entries[0].transport,'ECONNRESET');assert.equal(entries[1].stage,'operation');assert.equal(entries[1].category,'operation_failed');assert.ok(!JSON.stringify(entries).includes('secret'));
 });
+
+test('one-hour wizard creates a first-use hour key, reports correct units, preserves replay and rejects mixed plans',async()=>{
+ const f=fixture();for(const data of ['new','hours:1','devices:2','count:1'])await f.app.handle(callback(ADMIN,data));
+ assert.match(f.sent.at(-1).text,/1 giờ/);await f.app.handle(callback(ADMIN,f.sent.at(-1).rows[0][0].callback_data));
+ const item=(await f.store.list(ADMIN))[0],record=item.record;assert.equal(record.durationMs,3600000);assert.equal(record.activatedAt,0);assert.equal(record.expiresAt,0);assert.equal(record.maxDevices,2);
+ assert.ok(f.sent.some(s=>s.text?.includes('KEY ĐÃ TẠO')&&s.text.includes('1 giờ từ lần kích hoạt')));
+ const sales=Object.values(f.db.dump()._mizzeBotV1.sales);assert.equal(sales[0].hours,1);assert.equal(sales[0].days,0);assert.equal(sales[0].priceVnd,undefined);
+
+ await f.app.handle(callback(ADMIN,'view:'+item.hash.slice(0,16)));assert.match(f.sent.at(-1).text,/1 giờ từ lần dùng đầu/);
+ await f.db.ref('_mizzeBotV1/sales/'+item.hash).remove();await f.store.backfillSales();assert.equal((await f.db.ref('_mizzeBotV1/sales/'+item.hash).get()).val().hours,1);
+ for(const id of [ADMIN,7976468365,OWNER]){const a=await f.store.create(id,{hours:1,devices:1},900+id);assert.equal((await f.store.snapshot(a.entries[0].hash,id)).record.durationMs,3600000);}
+ for(const args of [{hours:8761,devices:1},{days:1,hours:1,devices:1},{hours:.5,devices:1}])await assert.rejects(f.store.create(ADMIN,args,999));
+ const a=await f.store.create(ADMIN,{hours:1,devices:1},990);const again=await f.store.create(ADMIN,{hours:1,devices:1},990);assert.equal(a.entries[0].hash,again.entries[0].hash);await assert.rejects(f.store.create(ADMIN,{days:1,devices:1},990),/operation_conflict/);
+ await f.app.handle(callback(ADMIN,'new'));await f.app.handle(callback(ADMIN,'hours:1'));await f.app.handle(callback(ADMIN,'days:7'));assert.equal((await f.store.state(ADMIN)).hours,0);
+});
+
+
+test('custom hour plans support admin presets, typed hours, owner extension and immutable first-use expiry',async()=>{
+ const f=fixture();for(const h of [2,3,6,12,23]){const a=await f.store.create(ADMIN,{hours:h,devices:1},12000+h);const record=(await f.store.snapshot(a.entries[0].hash,ADMIN)).record;assert.equal(record.durationMs,h*3600000);assert.equal(record.activatedAt,0);assert.equal(record.expiresAt,0);}
+ for(const h of [24,48,8760])await assert.rejects(f.store.create(ADMIN,{hours:h,devices:1},13000+h),/admin_plan/);
+ const a=await f.store.create(OWNER,{hours:48,devices:2},14000);assert.equal((await f.store.snapshot(a.entries[0].hash,OWNER)).record.durationMs,48*3600000);
+ for(const data of ['new','ask:hours'])await f.app.handle(callback(ADMIN,data));await f.app.handle(message(ADMIN,'7'));assert.equal((await f.store.state(ADMIN)).hours,7);assert.equal((await f.store.state(ADMIN)).days,0);
+ await f.app.handle(callback(ADMIN,'devices:1'));await f.app.handle(callback(ADMIN,'count:1'));assert.match(f.sent.at(-1).text,/7 giờ/);await f.app.handle(callback(ADMIN,f.sent.at(-1).rows[0][0].callback_data));assert.ok(f.sent.some(x=>x.text?.includes('7 giờ từ lần kích hoạt')));
+ await f.app.handle(callback(ADMIN,'new'));await f.app.handle(callback(ADMIN,'hours:3'));await f.app.handle(callback(ADMIN,'days:7'));assert.equal((await f.store.state(ADMIN)).hours,0);
+ await f.app.handle(callback(ADMIN,'hours:6'));assert.equal((await f.store.state(ADMIN)).days,0);assert.equal((await f.store.state(ADMIN)).hours,6);
+ await assert.rejects(f.store.create(ADMIN,{hours:3,devices:1},12002),/operation_conflict/);
+});

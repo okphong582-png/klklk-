@@ -24,7 +24,7 @@ bytes, proxy hoặc private key ký giấy phép.
   thông báo nếu mất phản hồi đúng lúc gửi; không tạo thêm key vì gửi lặp.
 
 Ba tài khoản cần mở bot rồi bấm **Start**. Dùng `/menu` để mở nút thao tác:
-tạo 1–10 key/lần, 1–50 máy/key; admin chọn 1/7/30 ngày, owner chọn 1–3650 ngày.
+tạo 1–10 key/lần, 1–50 máy/key; admin chọn 1 giờ hoặc 1/7/30 ngày, owner chọn 1–3650 ngày.
 Danh sách có phân trang, tra cứu,
 xem Key/mật khẩu, khóa/mở, gỡ một hoặc toàn bộ máy, đổi hạn mức, xóa có xác nhận,
 thống kê. Key firstUse chưa kích hoạt chưa tính giờ. Gỡ máy không đặt lại thời hạn.
@@ -114,3 +114,7 @@ không nhắn người thật hoặc sửa dữ liệu thật. Key cũ tạo b�
 khẩu trong database; bot không tự khôi phục hoặc đoán mật khẩu key cũ.
 
 Key và mật khẩu mới: mỗi phần đúng 16 ký tự chữ/số ngẫu nhiên an toàn, bỏ ký tự dễ nhầm I/O/0/1. Key và mật khẩu đã cấp trước đó vẫn giữ nguyên; menu R14.34 vẫn nhận cả mật khẩu 8 ký tự đã cấp.
+
+Gói 1 giờ: chọn Tạo key → 1 giờ. Thời lượng 3.600.000 ms bắt đầu ở lần dùng đầu, dùng chung hạn cho các máy. Báo cáo ghi 1 giờ và chưa có giá; không tự áp giá ngày. Dùng script upload kèm theo để cập nhật đủ app/store/plans/reports và tests.
+
+Giờ tùy chọn: 1, 3, 6, 12 giờ hoặc Nhập số giờ. Admin: 1–23 giờ; owner: 1–8760 giờ. Chỉ tính từ lần kích hoạt đầu, không cộng ngày và giờ trong cùng gói. Gói theo giờ chưa có giá bán tự động.

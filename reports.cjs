@@ -1,5 +1,6 @@
 'use strict';
 const {role}=require('./config.cjs');
+const {planLabel}=require('./plans.cjs');
 const OFFSET=7*3600000,PRICES=Object.freeze({1:5000,7:20000,30:40000});
 const vnDay=(now=Date.now())=>new Date(now+OFFSET).toISOString().slice(0,10);
 function bounds(day){if(!/^\d{4}-\d{2}-\d{2}$/.test(day))throw Error('invalid_day');const start=Date.parse(day+'T00:00:00+07:00');if(!Number.isFinite(start)||vnDay(start)!==day)throw Error('invalid_day');return {start,end:start+86400000};}
@@ -10,14 +11,14 @@ const xml=s=>String(s??'').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&
 function totals(rows){let total=0,unpriced=0;const byAdmin={};for(const row of rows){if(role(row.createdBy)!=='admin')continue;const group=byAdmin[row.createdBy]||(byAdmin[row.createdBy]={keys:0,total:0});group.keys++;if(Number.isSafeInteger(row.priceVnd)&&row.priceVnd>=0){total+=row.priceVnd;group.total+=row.priceVnd;}else unpriced++;}return {keys:rows.filter(r=>role(r.createdBy)==='admin').length,total,unpriced,byAdmin};}
 const priced=row=>Number.isSafeInteger(row.priceVnd)&&row.priceVnd>=0;
 const dateLabel=day=>{bounds(day);return day.slice(8)+' / '+day.slice(5,7)+' / '+day.slice(0,4);};
-function planTotals(rows){return [1,7,30].map(days=>{const entries=rows.filter(row=>role(row.createdBy)==='admin'&&row.days===days);return {days,keys:entries.length,total:entries.reduce((sum,row)=>sum+(priced(row)?row.priceVnd:0),0)};});}
+function planTotals(rows){return [...(rows.some(row=>row.hours===1)?[0]:[]),1,7,30].map(days=>{const entries=rows.filter(row=>role(row.createdBy)==='admin'&&row.days===days);return {days,...(days===0?{hours:1}:{}),keys:entries.length,total:entries.reduce((sum,row)=>sum+(priced(row)?row.priceVnd:0),0)};});}
 function reportCaption(day,rows,page=0,pages=Math.max(1,Math.ceil(rows.length/24))){
  const t=totals(rows);
  return '<b>📊 MIZZE · TỔNG KẾT CUỐI NGÀY</b>\n'+
   '📅 '+dateLabel(day)+' · UTC+7\n\n'+
   '💰 Owner phải thu: <b>'+money(t.total)+'</b>\n'+
   '🎟 '+t.keys+' key admin · '+Object.keys(t.byAdmin).length+' admin phát sinh\n'+
-  planTotals(rows).map(group=>'• '+group.days+' ngày: '+group.keys+' key · '+money(group.total)).join('\n')+
+  planTotals(rows).map(group=>'• '+planLabel(group)+': '+group.keys+' key · '+money(group.total)).join('\n')+
   (t.unpriced?'\n⚠️ '+t.unpriced+' key chưa có giá, chưa cộng vào tiền.':'')+
   '\n\nTrang '+(page+1)+'/'+pages+' · Tính theo key đã tạo\n<i>Chưa xác nhận thanh toán.</i>';
 }
@@ -41,7 +42,7 @@ function reportSvg(day,all,page=0){
  svg+=rect(576,156,268,132,'#141f2c')+text(600,187,'KEY ADMIN',13,'#8fa5bb',700)+text(600,235,t.keys,38,'#f0f5fb',700)+text(600,266,'Không gồm key owner tạo',13,'#8398ae');
  svg+=rect(864,156,268,132,'#141f2c')+text(888,187,'ADMIN PHÁT SINH',13,'#8fa5bb',700)+text(888,235,admins.length,38,'#f0f5fb',700)+text(888,266,t.unpriced?t.unpriced+' key chưa có giá':'Đã tổng hợp theo admin',13,t.unpriced?'#eac58b':'#8398ae');
  svg+=text(28,328,'CƠ CẤU GÓI KEY',14,'#a7bdcb',700);
- plans.forEach((group,index)=>{const x=28+index*374;svg+=rect(x,346,356,62,'#111f2a',12)+rect(x+14,359,71,34,'#20333b',9)+text(x+49,382,group.days+' NGÀY',12,'#b5ddd3',700,'middle')+text(x+100,372,group.keys+' key',16,'#e3eef4',700)+text(x+100,394,money(group.total),14,'#8fa8b9');});
+ plans.forEach((group,index)=>{const width=(1104-18*(plans.length-1))/plans.length,x=28+index*(width+18);svg+=rect(x,346,width,62,'#111f2a',12)+rect(x+14,359,71,34,'#20333b',9)+text(x+49,382,planLabel(group).toUpperCase(),12,'#b5ddd3',700,'middle')+text(x+100,372,group.keys+' key',16,'#e3eef4',700)+text(x+100,394,money(group.total),14,'#8fa8b9');});
  svg+=text(28,adminY+17,'TỔNG HỢP THEO ADMIN',14,'#a7bdcb',700)+text(1132,adminY+17,'Số liệu của cả ngày',12,'#6d879c',400,'end');
  admins.forEach(([id,group],index)=>{const x=28+(index%2)*562,y=adminY+36+Math.floor(index/2)*82;svg+=rect(x,y,542,68,'#131f2c',13)+rect(x+15,y+15,38,38,'#27313e',11)+text(x+34,y+40,String(index+1).padStart(2,'0'),14,'#d9c18f',700,'middle')+text(x+67,y+28,'ADMIN · '+id,15,'#d9e6ef',700)+text(x+67,y+50,group.keys+' key đã tạo',13,'#819aaf')+text(x+522,y+41,money(group.total),21,'#b6e6cf',700,'end');});
  if(!admins.length)svg+=rect(28,adminY+36,1104,68,'#131f2c',13)+text(52,adminY+77,'Chưa có phát sinh từ admin trong ngày này.',17,'#8ea9ba');
@@ -51,7 +52,7 @@ function reportSvg(day,all,page=0){
  rows.forEach((row,index)=>{const h=heights[index],stamp=new Date(Number(row.createdAt)+OFFSET),time=Number.isFinite(stamp.getTime())?stamp.toISOString().slice(11,16):'--:--';
   svg+=rect(28,y,1104,h-2,index%2?'#0f1a26':'#14212f',7);
   keyLines(row).forEach((line,lineIndex)=>{svg+=text(48,y+26+lineIndex*21,line,16,'#d9e8f0',400,'start','DejaVu Sans Mono,monospace');});
-  svg+=text(590,y+33,row.createdBy,14,'#91a9bc')+text(780,y+33,row.days+' ngày',14,'#aac2ce')+text(907,y+33,time,14,'#91a9bc')+text(1110,y+33,priced(row)?money(row.priceVnd):'Chưa đặt giá',16,priced(row)?'#a0dfc2':'#edc186',600,'end');y+=h;
+  svg+=text(590,y+33,row.createdBy,14,'#91a9bc')+text(780,y+33,row.hours===1?'1 giờ':row.days+' ngày',14,'#aac2ce')+text(907,y+33,time,14,'#91a9bc')+text(1110,y+33,priced(row)?money(row.priceVnd):'Chưa đặt giá',16,priced(row)?'#a0dfc2':'#edc186',600,'end');y+=h;
  });
  if(!rows.length)svg+=rect(28,bodyY,1104,106,'#121f2c',12)+text(580,bodyY+43,'CHƯA CÓ KEY ADMIN',20,'#b8ced9',700,'middle')+text(580,bodyY+75,'Không có key admin tạo trong ngày.',15,'#7c99ad',400,'middle');
  svg+=rect(28,footer,1104,56,'#172b2c',12)+text(48,footer+35,'TỔNG OWNER PHẢI THU',14,'#b5d8c7',700)+text(1110,footer+37,money(t.total),26,'#b4f0cf',700,'end');

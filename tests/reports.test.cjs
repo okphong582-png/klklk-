@@ -25,3 +25,10 @@ test('zero-sales day has an intentional empty state and a valid readable image',
  const svg=reportSvg('2026-10-25',[]).toString();assert.match(svg,/CHƯA CÓ KEY ADMIN/);assert.match(svg,/0 đ/);assert.ok(!svg.includes('NaN'));
  const info=await require('sharp')(await renderReport('2026-10-25',[])).metadata();assert.equal(info.width,1160);assert.ok(info.height>700);
 });
+
+test('hour plans keep correct units and remain unpriced in text and image reports',async()=>{
+ const rows=[{...row('HOUR'),days:0,hours:1,priceVnd:null},row('DAY')];assert.equal(totals(rows).total,5000);assert.equal(totals(rows).unpriced,1);
+ assert.equal(planTotals(rows)[0].hours,1);assert.match(reportCaption('2026-10-25',rows),/1 giờ: 1 key/);
+ const svg=reportSvg('2026-10-25',rows).toString();assert.match(svg,/1 GIỜ/);assert.match(svg,/Chưa đặt giá/);assert.ok(!svg.includes('NaN'));
+ const png=await renderReport('2026-10-25',rows);assert.equal((await require('sharp')(png).metadata()).width,1160);
+});
